@@ -90,8 +90,13 @@ class OikbClient:
         if directory_id:
             metadata["directory_id"] = directory_id
 
+        # ?process_in_background=false blocks until embedding + KB link
+        # complete. Upstream default is True, which returns 200 while the
+        # file is still `pending` — a subsequent /sync/diff can then race
+        # against the background task and see stale state.
         resp = self._http.post(
             "/files/",
+            params={"process_in_background": "false"},
             files={"file": (filename, file_content)},
             data={"metadata": json.dumps(metadata)},
         )
