@@ -138,9 +138,30 @@ class OikbClient:
         resp.raise_for_status()
         return resp.json()
 
-    def list_kb_files(self, kb_id: str) -> list[dict[str, Any]]:
-        """GET /knowledge/{id}/files — list files in a KB."""
-        resp = self._http.get(f"/knowledge/{kb_id}")
-        resp.raise_for_status()
-        data = resp.json()
-        return data.get("files", [])
+    def list_kb_files(
+        self,
+        kb_id: str,
+        page_size: int = 1000,
+    ) -> list[dict[str, Any]]:
+        """GET /knowledge/{id}/files — every file in the KB, with meta.
+
+        Walks the paginated endpoint (admins can override `limit`, so we ask
+        for a big page to keep round trips low). Each returned item carries
+        `.meta.data` — whatever the connector attached at upload time — which
+        is what the meta-drift detection in sync.py needs.
+        """
+        files: list[dict[str, Any]] = []
+        page = 1
+        while True:
+            resp = self._http.get(
+                f"/knowledge/{kb_id}/files",
+                params={"page": page, "limit": page_size},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            items = data.get("items", [])
+            files.extend(items)
+            if not items or len(files) >= data.get("total", 0):
+                break
+            page += 1
+        return files
