@@ -99,9 +99,13 @@ class ZoteroConnector(BaseConnector):
             )
 
         self.hierarchy = hierarchy
+        self.library_id = library_id
+        self.library_type = library_type or _zotero_env(
+            "ZOTERO_LIBRARY_TYPE", library_id, "user"
+        )
         self._zot = zotero.Zotero(
-            library_id,
-            library_type or _zotero_env("ZOTERO_LIBRARY_TYPE", library_id, "user"),
+            self.library_id,
+            self.library_type,
             api_key,
         )
         self.include_notes = _zotero_env("ZOTERO_INCLUDE_NOTES", library_id).strip().lower() in {
@@ -170,6 +174,25 @@ class ZoteroConnector(BaseConnector):
         if not file:
             raise FileNotFoundError(f"Unknown Zotero file: {path}/{filename}")
         return self._file_text(file).encode("utf-8")
+
+    def file_metadata(self, path: str, filename: str) -> dict[str, Any]:
+        """Zotero identifiers needed to build zotero:// deep links downstream.
+
+        The Filter Function on the Open WebUI side turns these into
+        `zotero://select/<library>/items/<item_key>` (or `open-pdf/...
+        items/<attachment_key>`) so citation clicks jump straight into
+        Zotero desktop.
+        """
+        file = self._files.get((path, filename))
+        if not file:
+            return {}
+        return {
+            "source": "zotero",
+            "zotero_item_key": file.item.get("key"),
+            "zotero_attachment_key": file.attachment.get("key"),
+            "zotero_library_id": self.library_id,
+            "zotero_library_type": self.library_type,
+        }
 
     def _walk_collection(
         self,

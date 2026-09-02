@@ -72,13 +72,21 @@ class OikbClient:
         kb_id: str,
         file_hash: str,
         directory_id: str | None = None,
+        extra_metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """POST /files/ — upload a single file to the KB."""
+        """POST /files/ — upload a single file to the KB.
 
-        metadata: dict[str, Any] = {
-            "knowledge_id": kb_id,
-            "file_hash": file_hash,
-        }
+        `extra_metadata` (source-specific, from `BaseConnector.file_metadata`)
+        is merged into the multipart `metadata` payload so it lands on the
+        file row and can be picked up by Filter Functions rendering citations.
+        Reserved keys (`knowledge_id`, `file_hash`, `directory_id`) always win.
+        """
+
+        metadata: dict[str, Any] = {}
+        if extra_metadata:
+            metadata.update(extra_metadata)
+        metadata["knowledge_id"] = kb_id
+        metadata["file_hash"] = file_hash
         if directory_id:
             metadata["directory_id"] = directory_id
 

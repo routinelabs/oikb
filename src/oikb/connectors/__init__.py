@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from typing import Any
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,6 +71,19 @@ class BaseConnector(ABC):
         Returns:
             Raw bytes of the file content.
         """
+
+    def file_metadata(self, path: str, filename: str) -> dict[str, Any]:
+        """Return source-specific meta to attach to the uploaded file.
+
+        Merged into the multipart `metadata` payload sent to Open WebUI's
+        `POST /files/`, on top of `knowledge_id`/`file_hash`. Keys land in
+        the file's row and are surfaced back on `GET /files/{id}` and in
+        RAG citations, so Filter Functions can render source-specific
+        links (e.g. `zotero://` deep links from item keys).
+
+        Default: no extra metadata.
+        """
+        return {}
 
     def close(self) -> None:
         """Release any resources (HTTP clients, etc.). No-op by default."""
