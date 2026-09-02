@@ -131,6 +131,69 @@ def _fmt_size(n: int) -> str:
     return f"{n:.1f} TB"
 
 
+def _promote_stale_meta(
+    client: OikbClient,
+    connector: BaseConnector,
+    kb_id: str,
+    manifest: list[ManifestEntry],
+    modified: list[dict[str, Any]],
+) -> int:
+    """Force re-upload of files whose content matches but metadata is stale.
+
+    Compares `meta.data` on each remote file against the keys the connector
+    currently emits from `file_metadata()`. If any expected key is missing
+    on the remote, the file is appended to `modified` in place (using its
+    remote id as `stale_file_id`) so the normal upload path handles it.
+
+    A no-op when the connector emits no metadata. On network failure the
+    fall-through is silent — meta drift is a best-effort correction and
+    should not fail a sync that otherwise would have succeeded.
+
+    Matches remote files to manifest entries by filename alone. A cross-
+    directory filename collision could pair the wrong entry to a remote
+    id, but that only means the re-upload lands under a different path —
+    still correct once the diff runs against the fresh state next time.
+    Zotero's filename dedup makes real collisions vanishingly rare.
+
+    Returns the number of files promoted.
+    """
+    expected_keys: set[str] = set()
+    for entry in manifest:
+        m = connector.file_metadata(entry.path, entry.filename)
+        if m:
+            expected_keys = set(m.keys())
+            break
+    if not expected_keys:
+        return 0
+
+    manifest_by_filename = {e.filename: e for e in manifest}
+    already_modified: set[str] = {m["stale_file_id"] for m in modified}
+
+    try:
+        remote_files = client.list_kb_files(kb_id)
+    except httpx.HTTPError:
+        return 0
+
+    promoted = 0
+    for r in remote_files:
+        file_id = r.get("id")
+        if not file_id or file_id in already_modified:
+            continue
+        entry = manifest_by_filename.get(r.get("filename"))
+        if entry is None:
+            continue
+        remote_meta = (r.get("meta") or {}).get("data") or {}
+        if expected_keys - remote_meta.keys():
+            modified.append({
+                "filename": entry.filename,
+                "path": entry.path,
+                "stale_file_id": file_id,
+            })
+            already_modified.add(file_id)
+            promoted += 1
+    return promoted
+
+
 def run_sync(
     client: OikbClient,
     connector: BaseConnector,
@@ -228,6 +291,15 @@ def _run_sync_inner(
     mkdir: list[str] = diff.get("mkdir", [])
     rmdir: list[str] = diff.get("rmdir", [])
     directory_map: dict[str, str] = diff.get("directory_map", {})
+
+    # Server-side diff only compares content checksums, so a file whose
+    # content is unchanged but whose metadata is out of date (older oikb
+    # ran the upload, connector's file_metadata() has since gained fields)
+    # comes back as unmodified. Detect those and promote to modified so
+    # the existing cleanup + upload path back-fills them.
+    stale_meta = _promote_stale_meta(client, connector, kb_id, manifest, modified)
+    if stale_meta:
+        unmodified_count = max(0, unmodified_count - stale_meta)
 
     result.unmodified = unmodified_count
 
