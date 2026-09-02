@@ -92,6 +92,9 @@ class OikbClient:
 
         resp = self._http.post(
             "/files/",
+            # process_in_background=false: upload returns only once the file is
+            # embedded, so the KB is queryable when the sync reports success.
+            params={"process_in_background": False},
             files={"file": (filename, file_content)},
             data={"metadata": json.dumps(metadata)},
         )
